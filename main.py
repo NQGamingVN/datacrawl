@@ -7,7 +7,7 @@ from flask import Flask
 import threading
 
 API_URL = "https://wtx.tele68.com/v1/tx/sessions"
-INTERVAL = 3500  # 3500 giây ~ 58 phút
+INTERVAL = 3600  # 3500 giây ~ 58 phút
 
 # ====== KẾT NỐI DB ======
 def get_conn():
@@ -30,7 +30,7 @@ def init_db():
         dice3 INT,
         point INT,
         result TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP
     )
     """)
     conn.commit()
@@ -94,6 +94,16 @@ def home():
 
 @app.route("/health")
 def health():
+    return "OK"
+
+if __name__ == "__main__":
+    # chạy loop_task trong thread riêng
+    t = threading.Thread(target=loop_task, daemon=True)
+    t.start()
+
+    # chạy Flask server trên port Render cung cấp
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)def health():
     return "OK"
 
 if __name__ == "__main__":
