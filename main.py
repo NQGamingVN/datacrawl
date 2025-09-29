@@ -57,7 +57,7 @@ def save_to_db(new_sessions):
 # ====== FETCH & SAVE ======
 def fetch_and_save():
     try:
-        resp = requests.get(API_URL, timeout=10)
+        resp = requests.get(API_URL, timeout=60)
         data = resp.json()
 
         if "list" not in data:
