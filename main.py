@@ -1,9 +1,10 @@
 import requests
-import json
 import os
 import time
-from datetime import datetime
 import psycopg2
+from datetime import datetime
+from flask import Flask
+import threading
 
 API_URL = "https://wtx.tele68.com/v1/tx/sessions"
 INTERVAL = 3500  # 3500 giây ~ 58 phút
@@ -15,7 +16,7 @@ def get_conn():
         database=os.getenv("DB_NAME"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASS"),
-        port=5432
+        port=os.getenv("DB_PORT", 5432)
     )
 
 def init_db():
@@ -76,10 +77,29 @@ def fetch_and_save():
         print(f"[{datetime.now()}] ❌ Lỗi khi fetch:", e)
         return 0
 
-# ====== CHẠY VÒNG LẶP ======
-if __name__ == "__main__":
+# ====== VÒNG LẶP ======
+def loop_task():
     init_db()
     while True:
         fetch_and_save()
-        print(f"⏳ Chờ {INTERVAL} giây để lấy dữ liệu lần tiếp theo...\n")
+        print(f"⏳ Chờ {INTERVAL} giây...\n")
         time.sleep(INTERVAL)
+
+# ====== FLASK WEB ======
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "App is running 🐢"
+
+@app.route("/health")
+def health():
+    return "OK"
+
+if __name__ == "__main__":
+    # chạy loop_task trong thread riêng
+    t = threading.Thread(target=loop_task, daemon=True)
+    t.start()
+
+    # chạy Flask server
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
