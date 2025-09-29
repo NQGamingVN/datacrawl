@@ -5,3 +5,14 @@ services:
     plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
+    envVars:
+      - key: DB_HOST
+        value: dpg-d3db1d7diees738jkfh0-a
+      - key: DB_PORT
+        value: "5432"
+      - key: DB_NAME
+        value: datatx_3j4v
+      - key: DB_USER
+        value: datatx_3j4v_user
+      - key: DB_PASS
+        value: suRQZUHIiA4nQZa3BBNSTxYXeXDZ4N49
