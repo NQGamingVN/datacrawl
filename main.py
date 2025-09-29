@@ -101,5 +101,6 @@ if __name__ == "__main__":
     t = threading.Thread(target=loop_task, daemon=True)
     t.start()
 
-    # chạy Flask server
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    # chạy Flask server trên port Render cung cấp
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
