@@ -29,8 +29,7 @@ def init_db():
         dice2 INT,
         dice3 INT,
         point INT,
-        result TEXT,
-        created_at TIMESTAMP(0) DEFAULT CURRENT_TIMESTAMP
+        result TEXT
     )
     """)
     conn.commit()
@@ -94,6 +93,16 @@ def home():
 
 @app.route("/health")
 def health():
+    return "OK"
+
+if __name__ == "__main__":
+    # chạy loop_task trong thread riêng
+    t = threading.Thread(target=loop_task, daemon=True)
+    t.start()
+
+    # chạy Flask server trên port Render cung cấp
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)def health():
     return "OK"
 
 if __name__ == "__main__":
