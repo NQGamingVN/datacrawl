@@ -7,17 +7,11 @@ from flask import Flask
 import threading
 
 API_URL = "https://wtx.tele68.com/v1/tx/sessions"
-INTERVAL = 3600  # 3500 giây ~ 58 phút
+INTERVAL = 3600
 
 # ====== KẾT NỐI DB ======
 def get_conn():
-    return psycopg2.connect(
-        host=os.getenv("DB_HOST"),
-        database=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASS"),
-        port=os.getenv("DB_PORT", 5432)
-    )
+    return psycopg2.connect(os.getenv("DATABASE_URL"))
 
 def init_db():
     conn = get_conn()
@@ -46,7 +40,8 @@ def save_to_db(new_sessions):
                 INSERT INTO sessions (id, dice1, dice2, dice3, point, result)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO NOTHING
-            """, (s["id"], s["dices"][0], s["dices"][1], s["dices"][2], s["point"], s["resultTruyenThong"]))
+            """, (s["id"], s["dices"][0], s["dices"][1], s["dices"][2],
+                  s["point"], s["resultTruyenThong"]))
         except Exception as e:
             print("❌ Lỗi insert:", e)
     conn.commit()
@@ -102,11 +97,7 @@ if __name__ == "__main__":
 
     # chạy Flask server trên port Render cung cấp
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-def health():
-    return "OK"
-
-if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=port)if __name__ == "__main__":
     # chạy loop_task trong thread riêng
     t = threading.Thread(target=loop_task, daemon=True)
     t.start()
