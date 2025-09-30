@@ -10,8 +10,18 @@ API_URL = "https://wtx.tele68.com/v1/tx/sessions"
 INTERVAL = 3600
 
 # ====== KẾT NỐI DB ======
+
 def get_conn():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
+    dsn = os.getenv("DATABASE_URL")
+    if not dsn:
+        raise ValueError("❌ DATABASE_URL chưa được set trong environment")
+    # đảm bảo luôn có sslmode=require
+    if "sslmode" not in dsn:
+        if "?" in dsn:
+            dsn += "&sslmode=require"
+        else:
+            dsn += "?sslmode=require"
+    return psycopg2.connect(dsn)
 
 def init_db():
     conn = get_conn()
