@@ -7,4 +7,4 @@ services:
     startCommand: python main.py
     envVars:
   - key: DATABASE_URL
-    value: postgresql://postgres:12345abC_MatKhau@db.yqtvaxgthwqjegjouxko.supabase.co:5432/postgres?sslmode=require
+    value: postgresql://postgres.yqtvaxgthwqjegjouxko:12345abC_MatKhau@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
