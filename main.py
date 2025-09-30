@@ -120,7 +120,8 @@ if __name__ == "__main__":
 
     # chạy Flask server trên port Render cung cấp
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)def home():
+    app.run(host="0.0.0.0", port=port)
+def home():
     return "App is running 🐢"
 
 @app.route("/health")
