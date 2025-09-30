@@ -10,9 +10,11 @@ services:
         value: db.yqtvaxgthwqjegjouxko.supabase.co
       - key: DB_NAME
         value: postgres
-      - key: DB_USER
-        value: postgres
       - key: DB_PASS
         value: 12345abC_MatKhau
       - key: DB_PORT
         value: 5432
+      - key: DB_USER
+        value: postgres
+      - key: DATABASE_URL
+        value: postgresql://postgres:12345abC_MatKhau@db.yqtvaxgthwqjegjouxko.supabase.co:5432/postgres
