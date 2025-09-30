@@ -21,7 +21,17 @@ def get_conn():
             dsn += "&sslmode=require"
         else:
             dsn += "?sslmode=require"
-    return psycopg2.connect(dsn)
+
+    retries = 5
+    for i in range(retries):
+        try:
+            conn = psycopg2.connect(dsn)
+            print("✅ Kết nối database thành công")
+            return conn
+        except Exception as e:
+            print(f"❌ Kết nối DB thất bại ({i+1}/{retries}): {e}")
+            time.sleep(5)  # đợi 5 giây rồi thử lại
+    raise Exception("Không thể kết nối database sau nhiều lần retry")
 
 def init_db():
     conn = get_conn()
@@ -83,9 +93,12 @@ def fetch_and_save():
 
 # ====== VÒNG LẶP ======
 def loop_task():
-    init_db()
     while True:
-        fetch_and_save()
+        try:
+            init_db()
+            fetch_and_save()
+        except Exception as e:
+            print(f"[{datetime.now()}] ⚠️ Lỗi trong loop_task: {e}")
         print(f"⏳ Chờ {INTERVAL} giây...\n")
         time.sleep(INTERVAL)
 
@@ -94,6 +107,20 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
+    return "App is running 🐢"
+
+@app.route("/health")
+def health():
+    return "OK"
+
+if __name__ == "__main__":
+    # chạy loop_task trong thread riêng
+    t = threading.Thread(target=loop_task, daemon=True)
+    t.start()
+
+    # chạy Flask server trên port Render cung cấp
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)def home():
     return "App is running 🐢"
 
 @app.route("/health")
