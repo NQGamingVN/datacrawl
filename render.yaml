@@ -8,3 +8,5 @@ services:
     envVars:
       - key: DATABASE_URL
         value: postgresql://postgres.yqtvaxgthwqjegjouxko:12345abC_MatKhau@aws-1-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+      - key: PYTHONUNBUFFERED
+        value: "1"
