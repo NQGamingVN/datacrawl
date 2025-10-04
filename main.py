@@ -3,9 +3,11 @@ import os
 import time
 import psycopg2
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, Response
 import threading
 import json
+import zipfile
+from io import BytesIO
 
 API_URL = "https://wtx.tele68.com/v1/tx/sessions"
 INTERVAL = 3600
@@ -90,6 +92,36 @@ def fetch_and_save():
         print(f"[{datetime.now()}] ❌ Lỗi khi fetch:", e)
         return 0
 
+# ====== CHUỖI LIÊN TỤC ======
+def get_continuous_chunks():
+    """Lấy các chuỗi dữ liệu liên tục (không bị đứt)"""
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Lấy tất cả ID và sắp xếp
+    cur.execute("SELECT id FROM sessions ORDER BY id")
+    all_ids = [row[0] for row in cur.fetchall()]
+    
+    if not all_ids:
+        return []
+    
+    # Tìm các chuỗi liên tục
+    chunks = []
+    current_chunk = [all_ids[0]]
+    
+    for i in range(1, len(all_ids)):
+        if all_ids[i] == all_ids[i-1] + 1:
+            current_chunk.append(all_ids[i])
+        else:
+            chunks.append(current_chunk)
+            current_chunk = [all_ids[i]]
+    
+    chunks.append(current_chunk)
+    
+    cur.close()
+    conn.close()
+    return chunks
+
 # ====== STATISTICS FUNCTIONS ======
 def get_statistics():
     """Lấy thống kê dữ liệu - LUÔN LÀM MỚI KHI GỌI"""
@@ -136,6 +168,19 @@ def get_statistics():
         """)
         stats['recent_sessions'] = cur.fetchall()
         
+        # Thống kê chuỗi liên tục
+        chunks = get_continuous_chunks()
+        stats['continuous_chunks'] = len(chunks)
+        stats['chunks_info'] = []
+        for i, chunk in enumerate(chunks[:10]):  # Hiển thị 10 chuỗi đầu
+            if chunk:
+                stats['chunks_info'].append({
+                    'name': f'data{i+1}',
+                    'start': chunk[0],
+                    'end': chunk[-1],
+                    'count': len(chunk)
+                })
+        
         # Thời gian cập nhật
         stats['last_updated'] = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
         
@@ -151,6 +196,126 @@ def get_statistics():
         conn.close()
     
     return stats
+
+# ====== XUẤT FILE THEO CHUỖI LIÊN TỤC ======
+def export_continuous_chunks_txt():
+    """Xuất nhiều file TXT theo chuỗi liên tục - đặt tên data1, data2..."""
+    conn = get_conn()
+    if not conn:
+        return "❌ Lỗi kết nối database", 500
+    
+    try:
+        # Lấy các chuỗi liên tục
+        chunks = get_continuous_chunks()
+        
+        if not chunks:
+            return "❌ Không có dữ liệu để xuất", 404
+        
+        # Tạo ZIP chứa tất cả file
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for i, chunk in enumerate(chunks):
+                if len(chunk) > 0:
+                    # Lấy dữ liệu cho chunk này
+                    cur = conn.cursor()
+                    placeholders = ','.join(['%s'] * len(chunk))
+                    cur.execute(f"""
+                        SELECT id, dice1, dice2, dice3, point, result 
+                        FROM sessions 
+                        WHERE id IN ({placeholders}) 
+                        ORDER BY id
+                    """, chunk)
+                    rows = cur.fetchall()
+                    cur.close()
+                    
+                    # Tạo nội dung file
+                    content = ""
+                    for row in rows:
+                        issue_id, dice1, dice2, dice3, point, result_text = row
+                        content += f"{issue_id}|{dice1}:{dice2}:{dice3}|{point}|{result_text}\n"
+                    
+                    # ĐẶT TÊN FILE: data1, data2, data3...
+                    filename = f"data{i+1}.txt"
+                    
+                    # Thêm vào ZIP
+                    zip_file.writestr(filename, content)
+        
+        zip_buffer.seek(0)
+        
+        # Trả về file ZIP
+        return Response(
+            zip_buffer.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": "attachment;filename=tx_data_continuous.zip"}
+        )
+        
+    except Exception as e:
+        return f"❌ Lỗi khi xuất file: {e}", 500
+    finally:
+        conn.close()
+
+def export_continuous_chunks_json():
+    """Xuất nhiều file JSON theo chuỗi liên tục - đặt tên data1, data2..."""
+    conn = get_conn()
+    if not conn:
+        return "❌ Lỗi kết nối database", 500
+    
+    try:
+        # Lấy các chuỗi liên tục
+        chunks = get_continuous_chunks()
+        
+        if not chunks:
+            return "❌ Không có dữ liệu để xuất", 404
+        
+        # Tạo ZIP chứa tất cả file
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for i, chunk in enumerate(chunks):
+                if len(chunk) > 0:
+                    # Lấy dữ liệu cho chunk này
+                    cur = conn.cursor()
+                    placeholders = ','.join(['%s'] * len(chunk))
+                    cur.execute(f"""
+                        SELECT id, dice1, dice2, dice3, point, result 
+                        FROM sessions 
+                        WHERE id IN ({placeholders}) 
+                        ORDER BY id
+                    """, chunk)
+                    rows = cur.fetchall()
+                    cur.close()
+                    
+                    # Chuyển đổi sang JSON
+                    data = []
+                    for row in rows:
+                        issue_id, dice1, dice2, dice3, point, result_text = row
+                        data.append({
+                            "id": issue_id,
+                            "dice1": dice1,
+                            "dice2": dice2,
+                            "dice3": dice3,
+                            "point": point,
+                            "result": result_text
+                        })
+                    
+                    # ĐẶT TÊN FILE: data1, data2, data3...
+                    filename = f"data{i+1}.json"
+                    
+                    # Thêm vào ZIP
+                    zip_file.writestr(filename, json.dumps(data, ensure_ascii=False, indent=2))
+        
+        zip_buffer.seek(0)
+        
+        # Trả về file ZIP
+        return Response(
+            zip_buffer.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": "attachment;filename=tx_data_continuous.zip"}
+        )
+        
+    except Exception as e:
+        return f"❌ Lỗi khi xuất file: {e}", 500
+    finally:
+        conn.close()
 
 # ====== FLASK WEB APP ======
 app = Flask(__name__)
@@ -276,6 +441,12 @@ HTML_TEMPLATE = '''
             padding: 8px 15px;
         }
         .btn-refresh:hover { background: #218838; }
+        .btn-success {
+            background: #28a745;
+        }
+        .btn-success:hover {
+            background: #218838;
+        }
         
         .update-info {
             background: #e7f3ff;
@@ -292,6 +463,14 @@ HTML_TEMPLATE = '''
             border-radius: 10px;
             margin-top: 10px;
             display: inline-block;
+        }
+        
+        .chunk-info {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 5px 0;
+            border-left: 3px solid #28a745;
         }
     </style>
 </head>
@@ -332,12 +511,12 @@ HTML_TEMPLATE = '''
                         <div class="stat-label">Tổng số phiên</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-number">{{ stats.duplicate_sessions|length }}</div>
-                        <div class="stat-label">Phiên trùng lặp</div>
+                        <div class="stat-number">{{ stats.continuous_chunks }}</div>
+                        <div class="stat-label">Số chuỗi liên tục</div>
                     </div>
                     <div class="stat-item">
-                        <div class="stat-number">{{ stats.missing_sessions|length }}</div>
-                        <div class="stat-label">Khoảng trống</div>
+                        <div class="stat-number">{{ stats.duplicate_sessions|length }}</div>
+                        <div class="stat-label">Phiên trùng lặp</div>
                     </div>
                     <div class="stat-item">
                         <div class="stat-number">{{ stats.last_session[0] if stats.last_session else 'N/A' }}</div>
@@ -345,6 +524,20 @@ HTML_TEMPLATE = '''
                     </div>
                 </div>
             </div>
+
+            {% if stats.chunks_info %}
+            <div class="card">
+                <h2>🔗 Các chuỗi dữ liệu liên tục</h2>
+                {% for chunk in stats.chunks_info %}
+                <div class="chunk-info">
+                    <strong>{{ chunk.name }}</strong>: {{ chunk.start }} → {{ chunk.end }} ({{ chunk.count }} phiên)
+                </div>
+                {% endfor %}
+                {% if stats.continuous_chunks > 10 %}
+                <p>... và {{ stats.continuous_chunks - 10 }} chuỗi khác</p>
+                {% endif %}
+            </div>
+            {% endif %}
 
             <div class="card">
                 <h2>📋 Thông tin phiên</h2>
@@ -432,14 +625,22 @@ HTML_TEMPLATE = '''
         <div id="export" class="tab-content">
             <div class="card">
                 <h2>📁 Xuất dữ liệu</h2>
-                <p>Chọn định dạng xuất dữ liệu:</p>
+                
+                <p><strong>📦 Xuất toàn bộ (1 file):</strong></p>
                 <a href="/export/txt" class="btn">📄 Xuất file TXT</a>
                 <a href="/export/json" class="btn">📋 Xuất file JSON</a>
+                
+                <p style="margin-top: 20px;"><strong>🔗 Xuất theo chuỗi liên tục (Khuyến nghị):</strong></p>
+                <p><small>Dữ liệu được tách thành nhiều file data1, data2, data3... mỗi file là một chuỗi ID liên tục</small></p>
+                <a href="/export/continuous-txt" class="btn btn-success">📁 TXT theo chuỗi liên tục</a>
+                <a href="/export/continuous-json" class="btn btn-success">📁 JSON theo chuỗi liên tục</a>
+                
                 <a href="/api/data" class="btn">🔗 API JSON</a>
                 
                 <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
                     <h3>📊 Thống kê hiện tại</h3>
                     <p><strong>Tổng số phiên:</strong> {{ stats.total_sessions }}</p>
+                    <p><strong>Số chuỗi liên tục:</strong> {{ stats.continuous_chunks }}</p>
                     <p><strong>Phiên đầu:</strong> {% if stats.first_session %}{{ stats.first_session[0] }}{% endif %}</p>
                     <p><strong>Phiên cuối:</strong> {% if stats.last_session %}{{ stats.last_session[0] }}{% endif %}</p>
                     <p><strong>Cập nhật:</strong> {{ stats.last_updated }}</p>
@@ -482,7 +683,7 @@ def health():
 
 @app.route("/export/txt")
 def export_txt():
-    """Xuất file TXT"""
+    """Xuất file TXT toàn bộ"""
     conn = get_conn()
     if not conn:
         return "❌ Lỗi kết nối database", 500
@@ -501,7 +702,6 @@ def export_txt():
             issue_id, dice1, dice2, dice3, point, result_text = row
             content += f"{issue_id}|{dice1}:{dice2}:{dice3}|{point}|{result_text}\n"
         
-        from flask import Response
         return Response(
             content,
             mimetype="text/plain",
@@ -516,7 +716,7 @@ def export_txt():
 
 @app.route("/export/json")
 def export_json():
-    """Xuất file JSON"""
+    """Xuất file JSON toàn bộ"""
     conn = get_conn()
     if not conn:
         return "❌ Lỗi kết nối database", 500
@@ -543,7 +743,6 @@ def export_json():
         
         filename = f"tx_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         
-        from flask import Response
         return Response(
             json.dumps(data, ensure_ascii=False, indent=2),
             mimetype="application/json",
@@ -555,6 +754,16 @@ def export_json():
     finally:
         cur.close()
         conn.close()
+
+@app.route("/export/continuous-txt")
+def export_continuous_txt():
+    """Xuất nhiều file TXT theo chuỗi liên tục"""
+    return export_continuous_chunks_txt()
+
+@app.route("/export/continuous-json")
+def export_continuous_json():
+    """Xuất nhiều file JSON theo chuỗi liên tục"""
+    return export_continuous_chunks_json()
 
 @app.route("/api/data")
 def api_data():
