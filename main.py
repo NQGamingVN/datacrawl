@@ -3,7 +3,7 @@ import os
 import time
 import psycopg2
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, Response
+from flask import Flask, render_template_string, Response, jsonify
 import threading
 import json
 import zipfile
