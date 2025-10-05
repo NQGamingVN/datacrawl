@@ -3,7 +3,7 @@ import os
 import time
 import psycopg2
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, request, jsonify, Response
+from flask import Flask, render_template_string, Response
 import threading
 import json
 import zipfile
@@ -132,53 +132,6 @@ def get_continuous_chunks():
     cur.close()
     conn.close()
     return chunks
-
-# ====== QUẢN LÝ DỮ LIỆU ======
-def delete_session(session_id):
-    """Xóa một phiên cụ thể"""
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM sessions WHERE id = %s", (session_id,))
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"❌ Lỗi xóa phiên {session_id}: {e}")
-        return False
-    finally:
-        cur.close()
-        conn.close()
-
-def delete_sessions_range(start_id, end_id):
-    """Xóa các phiên trong khoảng"""
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("DELETE FROM sessions WHERE id BETWEEN %s AND %s", (start_id, end_id))
-        count = cur.rowcount
-        conn.commit()
-        return count
-    except Exception as e:
-        print(f"❌ Lỗi xóa phiên {start_id}-{end_id}: {e}")
-        return 0
-    finally:
-        cur.close()
-        conn.close()
-
-def search_session(session_id):
-    """Tìm kiếm phiên theo ID"""
-    conn = get_conn()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT id, dice1, dice2, dice3, point, result FROM sessions WHERE id = %s", (session_id,))
-        session = cur.fetchone()
-        return session
-    except Exception as e:
-        print(f"❌ Lỗi tìm kiếm phiên {session_id}: {e}")
-        return None
-    finally:
-        cur.close()
-        conn.close()
 
 # ====== STATISTICS FUNCTIONS ======
 def get_statistics():
@@ -433,7 +386,7 @@ def export_continuous_chunks_json():
 # ====== FLASK WEB APP ======
 app = Flask(__name__)
 
-# HTML Template - ĐÃ SỬA LẠI CHO TX
+# HTML Template - ĐÃ ADAPT TỪ VN58 SANG TX
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="vi">
@@ -442,18 +395,349 @@ HTML_TEMPLATE = '''
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🎲 Quản Lý Dữ Liệu TX</title>
     <style>
-        /* CSS giữ nguyên */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .header h1 { color: #333; font-size: 2.5em; margin-bottom: 10px; }
+        .header p { color: #666; font-size: 1.1em; }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+        .card h2 { 
+            color: #333; 
+            margin-bottom: 20px; 
+            border-bottom: 2px solid #667eea; 
+            padding-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .stat-item {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-number { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
+        .stat-label { font-size: 0.9em; opacity: 0.9; }
+        
+        .session-item {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .badge-success { background: #28a745; color: white; }
+        .badge-warning { background: #ffc107; color: black; }
+        .badge-danger { background: #dc3545; color: white; }
+        .badge-info { background: #17a2b8; color: white; }
+        
+        .nav-tabs {
+            display: flex;
+            margin-bottom: 20px;
+            background: white;
+            border-radius: 10px;
+            padding: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .nav-tab {
+            padding: 10px 20px;
+            margin-right: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .nav-tab.active { background: #667eea; color: white; }
+        
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .btn {
+            background: #667eea;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 5px;
+            transition: background 0.3s ease;
+        }
+        .btn:hover { background: #764ba2; }
+        .btn-refresh {
+            background: #28a745;
+            font-size: 0.9em;
+            padding: 8px 15px;
+        }
+        .btn-success {
+            background: #28a745;
+        }
+        
+        .update-info {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .next-update {
+            background: #fff3cd;
+            padding: 10px 15px;
+            border-radius: 10px;
+            margin-top: 10px;
+            display: inline-block;
+        }
+        
+        .chunk-info {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 5px 0;
+            border-left: 3px solid #28a745;
+        }
+        
+        .retry-info {
+            background: #d4edda;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border-left: 4px solid #28a745;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🎲 Quản Lý Dữ Liệu TX</h1>
-            <p>Thu thập, quản lý và phân tích dữ liệu phiên chơi TX</p>
+            <p>Theo dõi và phân tích dữ liệu phiên chơi TX</p>
         </div>
 
-        <!-- Các phần còn lại giữ nguyên, nhưng ĐẢM BẢO dùng table "sessions" chứ không phải "sessions_new" -->
+        <div class="update-info">
+            <div>
+                📊 <strong>Dữ liệu thời gian thực</strong> - Cập nhật lúc: <strong>{{ stats.last_updated }}</strong>
+            </div>
+            <div class="next-update">
+                ⏰ Lần thu thập tiếp theo: <strong>{{ stats.next_fetch }}</strong>
+                <br>
+                <small>Dữ liệu được thu thập tự động mỗi giờ</small>
+            </div>
+            <div class="retry-info">
+                🔄 <strong>Auto Retry:</strong> Tối đa 5 lần thử lại (mỗi 5 phút) khi có lỗi
+            </div>
+        </div>
+
+        <div class="nav-tabs">
+            <div class="nav-tab active" onclick="showTab('dashboard')">📊 Dashboard</div>
+            <div class="nav-tab" onclick="showTab('sessions')">🎯 Phiên gần đây</div>
+            <div class="nav-tab" onclick="showTab('export')">📁 Xuất dữ liệu</div>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="card">
+                <h2>
+                    📈 Tổng quan hệ thống
+                    <button class="btn btn-refresh" onclick="refreshData()">🔄 Làm mới</button>
+                </h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-number">{{ stats.total_sessions }}</div>
+                        <div class="stat-label">Tổng số phiên</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">{{ stats.continuous_chunks }}</div>
+                        <div class="stat-label">Số chuỗi liên tục</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">{{ stats.duplicate_sessions|length }}</div>
+                        <div class="stat-label">Phiên trùng lặp</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-number">{{ stats.last_session[0] if stats.last_session else 'N/A' }}</div>
+                        <div class="stat-label">Phiên mới nhất</div>
+                    </div>
+                </div>
+            </div>
+
+            {% if stats.chunks_info %}
+            <div class="card">
+                <h2>🔗 Các chuỗi dữ liệu liên tục</h2>
+                {% for chunk in stats.chunks_info %}
+                <div class="chunk-info">
+                    <strong>{{ chunk.name }}</strong>: {{ chunk.start }} → {{ chunk.end }} ({{ chunk.count }} phiên)
+                </div>
+                {% endfor %}
+                {% if stats.continuous_chunks > 10 %}
+                <p>... và {{ stats.continuous_chunks - 10 }} chuỗi khác</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <div class="card">
+                <h2>📋 Thông tin phiên</h2>
+                {% if stats.first_session %}
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3>Phiên đầu tiên</h3>
+                        <div class="session-item">
+                            ID: {{ stats.first_session[0] }}<br>
+                            Xúc xắc: {{ stats.first_session[1] }}:{{ stats.first_session[2] }}:{{ stats.first_session[3] }}<br>
+                            Điểm: {{ stats.first_session[4] }}<br>
+                            Kết quả: <span class="badge badge-info">{{ stats.first_session[5] }}</span>
+                        </div>
+                    </div>
+                    <div>
+                        <h3>Phiên cuối cùng</h3>
+                        <div class="session-item">
+                            ID: {{ stats.last_session[0] }}<br>
+                            Xúc xắc: {{ stats.last_session[1] }}:{{ stats.last_session[2] }}:{{ stats.last_session[3] }}<br>
+                            Điểm: {{ stats.last_session[4] }}<br>
+                            Kết quả: <span class="badge badge-info">{{ stats.last_session[5] }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if stats.duplicate_sessions %}
+            <div class="card">
+                <h2>⚠️ Phiên trùng lặp</h2>
+                {% for session_id, count in stats.duplicate_sessions %}
+                <div class="session-item">
+                    <span class="badge badge-warning">Trùng</span>
+                    Phiên {{ session_id }} (xuất hiện {{ count }} lần)
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if stats.missing_sessions %}
+            <div class="card">
+                <h2>🔍 Khoảng trống dữ liệu</h2>
+                {% for start, end, count in stats.missing_sessions %}
+                <div class="session-item">
+                    <span class="badge badge-danger">Thiếu</span>
+                    {% if start == end %}
+                    Thiếu phiên: {{ start }}
+                    {% else %}
+                    Thiếu từ phiên {{ start }} đến {{ end }} ({{ count }} phiên)
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Recent Sessions Tab -->
+        <div id="sessions" class="tab-content">
+            <div class="card">
+                <h2>
+                    🎯 20 Phiên gần đây nhất
+                    <button class="btn btn-refresh" onclick="refreshData()">🔄 Làm mới</button>
+                </h2>
+                {% if stats.recent_sessions %}
+                {% for session in stats.recent_sessions %}
+                <div class="session-item">
+                    <strong>Phiên {{ session[0] }}</strong><br>
+                    Xúc xắc: {{ session[1] }}:{{ session[2] }}:{{ session[3] }} | 
+                    Điểm: {{ session[4] }} | 
+                    Kết quả: <span class="badge 
+                        {% if 'THẮNG' in session[5] %}badge-success
+                        {% elif 'THUA' in session[5] %}badge-danger
+                        {% else %}badge-info{% endif %}">
+                        {{ session[5] }}
+                    </span>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p>Chưa có dữ liệu phiên nào.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Export Tab -->
+        <div id="export" class="tab-content">
+            <div class="card">
+                <h2>📁 Xuất dữ liệu</h2>
+                
+                <p><strong>📦 Xuất toàn bộ (1 file):</strong></p>
+                <a href="/export/txt" class="btn">📄 Xuất file TXT</a>
+                <a href="/export/json" class="btn">📋 Xuất file JSON</a>
+                
+                <p style="margin-top: 20px;"><strong>🔗 Xuất theo chuỗi liên tục (Khuyến nghị):</strong></p>
+                <p><small>Dữ liệu được tách thành nhiều file data1, data2, data3... mỗi file là một chuỗi ID liên tục</small></p>
+                <a href="/export/continuous-txt" class="btn btn-success">📁 TXT theo chuỗi liên tục</a>
+                <a href="/export/continuous-json" class="btn btn-success">📁 JSON theo chuỗi liên tục</a>
+                
+                <a href="/api/data" class="btn">🔗 API JSON</a>
+                
+                <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                    <h3>📊 Thống kê hiện tại</h3>
+                    <p><strong>Tổng số phiên:</strong> {{ stats.total_sessions }}</p>
+                    <p><strong>Số chuỗi liên tục:</strong> {{ stats.continuous_chunks }}</p>
+                    <p><strong>Phiên đầu:</strong> {% if stats.first_session %}{{ stats.first_session[0] }}{% endif %}</p>
+                    <p><strong>Phiên cuối:</strong> {% if stats.last_session %}{{ stats.last_session[0] }}{% endif %}</p>
+                    <p><strong>Cập nhật:</strong> {{ stats.last_updated }}</p>
+                </div>
+            </div>
+        </div>
     </div>
+
+    <script>
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function refreshData() {
+            window.location.reload();
+        }
+    </script>
 </body>
 </html>
 '''
@@ -467,44 +751,6 @@ def home():
 def health():
     return "OK"
 
-# ====== API QUẢN LÝ ======
-@app.route("/api/session/<int:session_id>")
-def api_get_session(session_id):
-    """API lấy thông tin phiên"""
-    session = search_session(session_id)
-    if session:
-        return jsonify({"success": True, "session": session})
-    else:
-        return jsonify({"success": False, "error": "Không tìm thấy phiên"})
-
-@app.route("/api/delete/<int:session_id>", methods=["DELETE"])
-def api_delete_session(session_id):
-    """API xóa phiên"""
-    success = delete_session(session_id)
-    if success:
-        return jsonify({"success": True, "message": f"Đã xóa phiên {session_id}"})
-    else:
-        return jsonify({"success": False, "error": "Lỗi khi xóa phiên"})
-
-@app.route("/api/delete-range/<int:start_id>/<int:end_id>", methods=["DELETE"])
-def api_delete_sessions_range(start_id, end_id):
-    """API xóa khoảng phiên"""
-    deleted_count = delete_sessions_range(start_id, end_id)
-    if deleted_count > 0:
-        return jsonify({"success": True, "deleted_count": deleted_count})
-    else:
-        return jsonify({"success": False, "error": "Lỗi khi xóa khoảng phiên"})
-
-@app.route("/api/manual-fetch", methods=["POST"])
-def api_manual_fetch():
-    """API fetch dữ liệu thủ công"""
-    try:
-        saved_count = fetch_and_save_with_retry()
-        return jsonify({"success": True, "saved_count": saved_count})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
-
-# ====== API XUẤT FILE ======
 @app.route("/export/txt")
 def export_txt():
     return export_full_txt()
